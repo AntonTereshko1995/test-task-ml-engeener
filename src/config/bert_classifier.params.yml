@@ -1,0 +1,28 @@
+model:
+  baseline:
+    model_name: "bert-base-uncased"  # Pretrained BERT model
+    max_length: 64
+    batch_size: 16
+    learning_rate: 1e-5
+    num_train_epochs: 7
+    weight_decay: 0.05
+    dropout: 0.1
+    problem_type: "multi_label_classification"
+    eval_strategy: "epoch"
+    save_strategy: "epoch"
+    logging_steps: 10
+  # tune:
+  #   cv: 5
+  #   metric: "f1"
+  #   search:
+  #     learning_rate: [1e-5, 2e-5, 3e-5]
+  #     batch_size: [8, 16]
+  #     num_train_epochs: [3, 5, 7]
+  #     weight_decay: [0.01, 0.1]
+  #     dropout: [0.1, 0.2]
+data:
+  label: "Title"
+  text_column: "Title"
+  features: ["Column 1", "Column 2", "Column 3", "Column 4"]
+  temp_size: 0.3
+  test_size: 0.5

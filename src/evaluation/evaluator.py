@@ -1,12 +1,14 @@
 
 import sklearn_evaluation
+import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from typing import Any, List, Dict
-from sklearn.metrics import f1_score, log_loss, accuracy_score
+from sklearn.metrics import f1_score, hamming_loss, jaccard_score, log_loss, accuracy_score, precision_score, recall_score
 from sklearn.model_selection import GridSearchCV
+import torch
 
-def evaluate_search(search: GridSearchCV, plot_params_name: List[str], subset_params_name: List[str] = None, to_mlflow: bool = False):
+def evaluate_cat_boost_search(search: GridSearchCV, plot_params_name: List[str], subset_params_name: List[str] = None, to_mlflow: bool = False):
     if len(plot_params_name) != 2:
         ValueError("Exactly two parameters have to be indicated for the evaluation (they are displayed on a grid).")
 
@@ -50,14 +52,87 @@ def evaluate_search(search: GridSearchCV, plot_params_name: List[str], subset_pa
                 print(f"Logging figure to MLflow with name: {fname}")
             ax.plot()
 
-def evaluate_classifier(model: Any, X_test: np.ndarray, y_test: np.ndarray) -> Dict[str, float]:
+def evaluate_cat_boost_classifier(model: Any, X_test: np.ndarray, y_test: np.ndarray) -> Dict[str, float]:
     predictions = model.predict(X_test)
     predictions_proba = model.predict_proba(X_test)
-
     metrics = {
         "Accuracy": accuracy_score(y_test, predictions),
         "Log Loss": log_loss(y_test, predictions_proba),
         "F1 Score": f1_score(y_test, predictions, average="weighted")
     }
+    return metrics
 
+def evaluate_bert(trainer, test_dataset):
+    results = trainer.evaluate(test_dataset)
+    predictions = trainer.predict(test_dataset)
+    probs = torch.sigmoid(torch.tensor(predictions.predictions))  # Convert logits to probabilities
+    preds = (probs > 0.5).int().numpy()  # Apply threshold of 0.5
+    labels = np.array(predictions.label_ids)  # Convert labels to numpy array
+
+    metrics = {
+        "Accuracy (Subset)": accuracy_score(labels, preds),  # Exact match accuracy
+        "Log Loss": log_loss(labels, probs.numpy()),  # Lower is better
+        "F1 Score (Macro)": f1_score(labels, preds, average="macro"),  # F1 across all labels
+        "F1 Score (Micro)": f1_score(labels, preds, average="micro"),
+        "Precision (Macro)": precision_score(labels, preds, average="macro"),
+        "Recall (Macro)": recall_score(labels, preds, average="macro"),
+        "Hamming Loss": hamming_loss(labels, preds),  # Penalizes incorrect labels
+        "Jaccard Score (Macro)": jaccard_score(labels, preds, average="macro"),
+    }
+    
+    df_results = pd.DataFrame([metrics])
+    print(df_results.to_string(index=False))
+
+def debug_predict_and_evaluate(model, device, tokenizer, data_frame, texts):
+    model.eval()
+    inputs = tokenizer(texts, padding=True, truncation=True, return_tensors="pt").to(device)
+
+    with torch.no_grad():
+        outputs = model(**inputs)
+
+    logits = outputs.logits.to("cpu").numpy()
+    probs = torch.sigmoid(torch.tensor(logits))  # Convert logits to probabilities
+    preds = (probs > 0.5).int().numpy()  # Threshold at 0.5
+    
+    real_labels = data_frame[data_frame["Title"].isin(texts)][["Title", "Features"]]
+    # Print real labels
+    print(real_labels)
+
+    print("Raw Logits:", logits)
+    print("Probabilities:", probs.numpy())
+    print("Binary Predictions:", preds)
+
+    metrics = bert_predict_and_evaluate(model, tokenizer, texts, real_labels)
+    print(metrics)
+
+    return preds
+
+def bert_predict_and_evaluate(model, tokenizer, texts, true_labels):
+    device = torch.device("mps") if torch.backends.mps.is_available() else torch.device("cpu")
+    model.to(device)
+    model.eval()
+
+    inputs = tokenizer(texts, padding=True, truncation=True, return_tensors="pt").to(device)
+    with torch.no_grad():
+        outputs = model(**inputs)
+
+    logits = outputs.logits.to("cpu").numpy()  # Move logits to CPU for processing
+    metrics = bert_compute_metrics(logits, true_labels)  # Compute evaluation metrics
+    print(metrics)
+    return metrics
+
+def bert_compute_metrics(predictions, true_labels):
+    probs = torch.sigmoid(torch.tensor(predictions))
+    preds = (probs > 0.5).int().numpy()
+    true_labels = np.array(true_labels)  # Ensure true labels are numpy array
+    metrics = {
+        "Accuracy (Subset)": accuracy_score(true_labels, preds),  # Subset accuracy (exact match)
+        "Log Loss": log_loss(true_labels, probs.numpy()),  # Log loss (lower is better)
+        "F1 Score (Macro)": f1_score(true_labels, preds, average="macro"),  # F1-score across all labels
+        "F1 Score (Micro)": f1_score(true_labels, preds, average="micro"),
+        "Precision (Macro)": precision_score(true_labels, preds, average="macro"),
+        "Recall (Macro)": recall_score(true_labels, preds, average="macro"),
+        "Hamming Loss": hamming_loss(true_labels, preds),  # Penalizes incorrect labels
+        "Jaccard Score (Macro)": jaccard_score(true_labels, preds, average="macro")
+    }
     return metrics

@@ -21,6 +21,12 @@ def set_low_register(data_frame):
 def combine_columns(df, columns):
     return df[columns].apply(lambda x: [label for label in x if label], axis=1)
 
+def get_unique_labels(df, columns):
+    return set(df[columns].values.flatten()) - {""}
+
+def encode_data(row, data):
+    return [1 if label in row.values else 0 for label in data]
+
 def apply_one_hot_encoding(df, columns):
     encoder = OneHotEncoder(sparse=False, handle_unknown='ignore')
     encoded_data = encoder.fit_transform(df[columns].astype(str))
